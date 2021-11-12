@@ -186,4 +186,8 @@ config SIFIVE_U_PRCI
 config VIRT_CTRL
     bool
 
+config XTENSA_XTSC
+    bool
+    default y
+
 source macio/Kconfig

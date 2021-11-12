@@ -42,3 +42,5 @@ specific_ss.add(when: 'CONFIG_SOFTMMU', if_true: files(
   'machine-qmp-cmds.c',
   'numa.c',
 ))
+
+common_ss.add(files('xtsc.c'))

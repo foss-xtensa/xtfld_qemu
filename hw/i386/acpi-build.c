@@ -73,6 +73,8 @@
 #include "hw/acpi/ipmi.h"
 #include "hw/acpi/hmat.h"
 
+#include "hw/misc/xtensa_xtsc.h"
+
 /* These are used to size the ACPI tables for -M pc-i440fx-1.7 and
  * -M pc-i440fx-2.0.  Even if the actual amount of AML generated grows
  * a little bit, there should be plenty of free space since the DSDT
@@ -1345,6 +1347,74 @@ static Aml *build_q35_osc_method(void)
     return method;
 }
 
+static void build_xtensa_xtsc_aml(Aml *table)
+{
+    Aml *scope = aml_scope("_SB");
+    Object **xtsc_dev;
+    xtsc_dev = xtensa_xtsc_devices();
+    if (xtsc_dev) {
+        bool xtensa_added = false;
+        //warn_report("build_xtensa_xtsc_aml(): xtsc_dev[%d]=%s", i, ((xtsc_dev[i]==NULL)?"NULL":"exist"));
+
+        for (unsigned i = 0; xtsc_dev[i]; ++i) {
+            char name[20];
+            int version = 1;
+            Aml *dev = aml_device("GXS%d", i);
+            Aml *crs;
+            const char *hid_name[] = {
+                "CXRP0000",
+                "CXRP0001",
+                "CXRS0000",
+            };
+
+            if (xtensa_xtsc_get_addr(xtsc_dev[i], 1) &&
+                xtensa_xtsc_get_size(xtsc_dev[i], 1)) {
+                version = 0;
+            }
+            if (xtensa_xtsc_get_addr(xtsc_dev[i], 2)) {
+                version = 2;
+            }
+
+            //warn_report("\tloop %d, version=%d", i, version);
+
+            snprintf(name, sizeof(name), "xtensa_xtsc_%d", i);
+
+            aml_append(dev, aml_name_decl("_HID", aml_string("%s", hid_name[version])));
+            aml_append(dev, aml_name_decl("_STR", aml_unicode(name)));
+
+            crs = aml_resource_template();
+            if (version == 0 || version == 2) {
+                uint64_t rsize = xtensa_xtsc_get_size(xtsc_dev[i], 1);
+
+                if (version == 2) {
+                    aml_append(crs, aml_memory32_fixed(xtensa_xtsc_get_addr(xtsc_dev[i], 2),
+                                                       xtensa_xtsc_get_size(xtsc_dev[i], 2),
+                                                       AML_READ_WRITE));
+                } else {
+                    aml_append(crs, aml_memory32_fixed(xtensa_xtsc_get_addr(xtsc_dev[i], 1),
+                                                       4096,
+                                                       AML_READ_WRITE));
+                }
+                aml_append(crs, aml_memory32_fixed(xtensa_xtsc_get_addr(xtsc_dev[i], 1),
+                                                   4096,
+                                                   AML_READ_WRITE));
+                aml_append(crs, aml_memory32_fixed(xtensa_xtsc_get_addr(xtsc_dev[i], 0) + rsize,
+                                                   xtensa_xtsc_get_size(xtsc_dev[i], 0) - rsize,
+                                                   AML_READ_WRITE));
+            } else if (version == 1) {
+                aml_append(crs, aml_memory32_fixed(xtensa_xtsc_get_addr(xtsc_dev[i], 0),
+                                                   xtensa_xtsc_get_size(xtsc_dev[i], 0),
+                                                   AML_READ_WRITE));
+            }
+            aml_append(dev, aml_name_decl("_CRS", crs));
+            aml_append(scope, dev);
+            xtensa_added = true;
+        }
+        if ( xtensa_added )
+            aml_append(table, scope);
+    }
+}
+
 static void build_smb0(Aml *table, I2CBus *smbus, int devnr, int func)
 {
     Aml *scope = aml_scope("_SB.PCI0");
@@ -1456,6 +1526,8 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
         aml_append(sb_scope, build_vmbus_device_aml(vmbus_bridge));
         aml_append(dsdt, sb_scope);
     }
+
+    build_xtensa_xtsc_aml(dsdt);
 
     if (pcmc->legacy_cpu_hotplug) {
         build_legacy_cpu_hotplug_aml(dsdt, machine, pm->cpu_hp_io_base);
